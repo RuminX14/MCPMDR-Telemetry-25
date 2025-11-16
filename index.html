@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="pl">
 <head>
-  <meta charset="UTF-8">
-  <title>System Telemetrii Radiosond MCPMDR</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <title>MCPMDR – System telemetryczny radiosond</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Leaflet -->
+  <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
@@ -13,44 +13,41 @@
     crossorigin=""
   />
 
-  <!-- Główny CSS -->
-  <link rel="stylesheet" href="assets/style.css">
+  <!-- Główny CSS aplikacji -->
+  <link rel="stylesheet" href="/assets/style.css" />
 </head>
 <body>
   <!-- Overlay logowania -->
   <div id="login-overlay" class="login-overlay">
-    <div class="login-panel">
-      <div class="login-title" data-i18n="login_title">
-        SYSTEM TELEMETRII RADIOSOND METEOROLOGICZNYCH
+    <div class="login-panel glass">
+      <h1 data-i18n="login_title">SYSTEM TELEMETRII RADIOSOND METEOROLOGICZNYCH</h1>
+      <p class="brand-sub" data-i18n="brand_sub">Dostęp chroniony hasłem</p>
+      <div class="login-form">
+        <label for="password" data-i18n="login_password_label">Hasło</label>
+        <input id="password" type="password" autocomplete="off" />
+        <button id="login-btn" class="btn primary" data-i18n="login_button">
+          Zaloguj
+        </button>
+        <div id="login-error" class="login-error"></div>
       </div>
-      <div class="login-sub" data-i18n="brand_sub">
-        Dostęp chroniony hasłem
-      </div>
-      <label class="login-label">
-        <span data-i18n="login_password_label">Hasło</span>
-        <input id="password" type="password" autocomplete="current-password">
-      </label>
-      <button id="login-btn" class="btn primary" data-i18n="login_button">
-        Zaloguj
-      </button>
-      <div id="login-error" class="login-error"></div>
     </div>
   </div>
 
-  <!-- Aplikacja -->
-  <div id="app" class="hidden">
-    <!-- Górny pasek -->
+  <!-- Główna aplikacja -->
+  <div id="app" class="app hidden">
+    <!-- TOPBAR -->
     <header class="topbar">
-      <div class="brand">
-        <div class="brand-main" data-i18n="login_title">
-          SYSTEM TELEMETRII RADIOSOND METEOROLOGICZNYCH
+      <div class="topbar-left">
+        <div class="brand">
+          <div class="brand-title" data-i18n="login_title">
+            SYSTEM TELEMETRII RADIOSOND METEOROLOGICZNYCH
+          </div>
         </div>
-        <!-- bez brand-sub w topbarze -->
       </div>
 
-      <div class="topbar-right">
-        <!-- Źródło danych -->
-        <div class="source-switch">
+      <div class="topbar-center">
+        <!-- Przełącznik źródła -->
+        <div class="segmented">
           <button id="seg-ttgo" class="seg-btn" data-src="ttgo" data-i18n="source_ttgo">
             TTGO
           </button>
@@ -59,100 +56,97 @@
           </button>
         </div>
 
-        <!-- URL TTGO -->
-        <div id="ttgo-url-wrap" class="top-input hidden">
-          <label>
-            <span data-i18n="ttgo_url_label">URL TTGO</span>
-            <input id="ttgo-url" type="text" placeholder="http://192.168.0.50/sondes.json">
-          </label>
+        <!-- TTGO URL -->
+        <div id="ttgo-url-wrap" class="inline-field hidden">
+          <label for="ttgo-url" data-i18n="ttgo_url_label">URL TTGO</label>
+          <input id="ttgo-url" type="text" placeholder="http://192.168.0.50/sondes.json" />
         </div>
 
-        <!-- Wyszukiwanie sond (radiosondy.info) -->
-        <div id="radiosondy-search" class="top-input">
-          <label>
-            <span data-i18n="sonde_id_label">ID sondy</span>
-            <input id="sonde-id" type="text" placeholder="np. RS41, DFM, ID">
-          </label>
-          <button id="btn-search" class="btn ghost" data-i18n="btn_search">Szukaj</button>
-          <button id="btn-show-all" class="btn ghost" data-i18n="btn_show_all">Wszystkie</button>
+        <!-- radiosondy.info – filtr ID -->
+        <div id="radiosondy-search" class="inline-field">
+          <label for="sonde-id" data-i18n="sonde_id_label">ID sondy</label>
+          <input id="sonde-id" type="text" placeholder="np. RS41" />
+          <button id="btn-search" class="btn small" data-i18n="btn_search">Szukaj</button>
+          <button id="btn-show-all" class="btn ghost small" data-i18n="btn_show_all">Wszystkie</button>
         </div>
+      </div>
+
+      <div class="topbar-right">
+        <!-- Zakładki widoków -->
+        <nav class="tabs">
+          <button class="tab active" data-view="telemetry">Telemetria</button>
+          <button class="tab" data-view="charts" data-i18n="charts_title">
+            Dane graficzne
+          </button>
+        </nav>
 
         <!-- Język -->
         <div class="lang">
-          <button class="btn ghost btn-small" data-lang="pl">PL</button>
-          <button class="btn ghost btn-small" data-lang="en">EN</button>
+          <button class="btn small" data-lang="pl">PL</button>
+          <button class="btn small" data-lang="en">EN</button>
         </div>
       </div>
     </header>
 
-    <!-- Zakładki widoków -->
-    <nav class="view-tabs">
-      <button class="tab active" data-view="telemetry">Telemetria</button>
-      <button class="tab" data-view="charts" data-i18n="charts_title">Dane graficzne</button>
-    </nav>
-
-    <!-- Główna przestrzeń widoków -->
-    <main class="views">
-      <!-- Widok Telemetria -->
-      <section id="view-telemetry" class="view telemetry" aria-label="Telemetria">
+    <!-- GŁÓWNY LAYOUT -->
+    <main class="main-layout">
+      <!-- WIDOK: TELEMETRIA -->
+      <section id="view-telemetry" class="view">
         <div id="map" class="map"></div>
 
-        <aside id="sidepanel" class="sidepanel">
-          <!-- Zakładki sond -->
-          <div id="sonde-tabs" class="sonde-tabs"></div>
-
-          <!-- Panel danych aktywnej sondy -->
-          <div id="sonde-panel" class="sonde-panel"></div>
-
-          <!-- Status -->
-          <div id="status-line" class="status-line">
-            Oczekiwanie na dane...
+        <aside class="side-panel">
+          <div id="sonde-tabs" class="sonde-tabs">
+            <!-- zakładki sond tworzy JS -->
+          </div>
+          <div id="sonde-panel" class="sonde-panel-grid">
+            <!-- panel danych sondy renderowany przez JS -->
           </div>
         </aside>
       </section>
 
-      <!-- Widok Dane graficzne: pełnoekranowa warstwa z wykresami -->
-      <section id="view-charts" class="view charts" aria-label="Dane graficzne">
-        <div class="charts-grid">
-          <!-- Mała mapa z trajektorią sondy -->
-          <div class="card mini-map-card">
+      <!-- WIDOK: DANE GRAFICZNE -->
+      <section id="view-charts" class="view">
+        <div class="charts-layout">
+          <!-- mini mapa trasy sondy -->
+          <div class="card chart-card mini-map-card">
             <div class="card-head">
-              <span>Trajektoria sondy</span>
+              <span>Trasa aktualnej sondy</span>
+              <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
             </div>
             <div id="mini-map" class="mini-map"></div>
           </div>
 
-          <!-- 1) Voltages vs Temperature (czasowy) -->
+          <!-- 1) Temperatura vs czas -->
           <div class="card chart-card">
             <div class="card-head">
-              <span>Voltages vs Temperature</span>
+              <span>Temperatura w czasie</span>
               <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
             </div>
             <canvas id="chart-volt-temp"></canvas>
           </div>
 
-          <!-- 2) GNSS Satellites in Use -->
+          <!-- 2) GNSS (placeholder) -->
           <div class="card chart-card">
             <div class="card-head">
-              <span>GNSS Satellites in Use</span>
+              <span>GNSS – satelity w użyciu</span>
               <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
             </div>
             <canvas id="chart-gnss"></canvas>
           </div>
 
-          <!-- 3) Payload Environmental Sensor Data -->
+          <!-- 3) Czujniki środowiskowe -->
           <div class="card chart-card">
             <div class="card-head">
-              <span>Payload Environmental Sensor Data</span>
+              <span>Temperatura / wilgotność / ciśnienie</span>
               <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
             </div>
             <canvas id="chart-env"></canvas>
           </div>
 
-          <!-- 4) Reported Horizontal Velocity -->
+          <!-- 4) Prędkość pozioma -->
           <div class="card chart-card">
             <div class="card-head">
-              <span>Reported Horizontal Velocity</span>
+              <span>Prędkość pozioma w czasie</span>
               <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
             </div>
             <canvas id="chart-hvel"></canvas>
@@ -167,10 +161,10 @@
             <canvas id="chart-density"></canvas>
           </div>
 
-          <!-- 6) Moc sygnału i napięcie vs temperatura -->
+          <!-- 6) RSSI / napięcie vs temperatura -->
           <div class="card chart-card">
             <div class="card-head">
-              <span>Moc sygnału / napięcie vs temperatura</span>
+              <span>RSSI i napięcie vs temperatura</span>
               <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
             </div>
             <canvas id="chart-signal-temp"></canvas>
@@ -178,19 +172,24 @@
         </div>
       </section>
     </main>
+
+    <!-- Status linii -->
+    <footer id="status-line" class="status-line">
+      <!-- komunikaty o stanie pobierania -->
+    </footer>
   </div>
 
   <!-- Leaflet JS -->
   <script
     src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    integrity="sha256-20nQCchB9co0qIJ5H1A7jtPpHt2yPlkPCm0C5p3p3s0="
     crossorigin=""
   ></script>
 
-  <!-- Chart.js -->
+  <!-- Chart.js UMD -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-  <!-- Aplikacja -->
-  <script src="assets/app.js"></script>
+  <!-- Główny JS aplikacji -->
+  <script src="/assets/app.js"></script>
 </body>
 </html>
