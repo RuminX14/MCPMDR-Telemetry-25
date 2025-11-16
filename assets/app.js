@@ -18,11 +18,7 @@
     sondes: new Map(),      // id -> sonde object
     activeId: null,
     charts: {},
-    lang: localStorage.getItem('lang') || 'pl',
-    // mini-mapa w zakładce wykresów
-    miniMap: null,
-    miniPolyline: null,
-    miniMarker: null
+    lang: localStorage.getItem('lang') || 'pl'
   };
 
   // ======= i18n =======
@@ -104,7 +100,7 @@
   function dewPoint(T, RH) {
     if (!Number.isFinite(T) || !Number.isFinite(RH)) return null;
     const a = 17.27, b = 237.7;
-    const alpha = (a * T) / (b + T) + Math.log(clamp(RH, 0, 100) / 100);
+    const alpha = (a * T) / (b + T) + Math.log(Math.max(0.01, Math.min(0.99, RH / 100)));
     return (b * alpha) / (a - alpha);
   }
 
@@ -136,22 +132,7 @@
     return null;
   }
 
-  // parsowanie pola Description z radiosondy.info
-  function parseDescription(desc) {
-    if (!desc) return {};
-    const num = re => {
-      const m = desc.match(re);
-      return m ? parseFloat(m[1]) : null;
-    };
-    const out = {};
-    out.verticalSpeed = num(/Clb\s*=\s*([-+]?\d+(?:\.\d+)?)\s*m\/s/i);
-    out.temp = num(/t\s*=\s*([-+]?\d+(?:\.\d+)?)\s*C/i);
-    out.humidity = num(/h\s*=\s*([-+]?\d+(?:\.\d+)?)\s*%/i);
-    out.pressure = num(/p\s*=\s*([-+]?\d+(?:\.\d+)?)\s*hPa/i);
-    out.battery = num(/(?:batt|bat|vbatt)\s*=\s*([-+]?\d+(?:\.\d+)?)\s*V/i);
-    return out;
-  }
-
+  // prosty wskaźnik stabilności – średni gradient temperatury z górnych kilku odcinków
   function computeStability(history) {
     const pts = history
       .filter(h => Number.isFinite(h.temp) && Number.isFinite(h.alt))
@@ -186,6 +167,22 @@
     else cls = 'silnie stabilna';
 
     return { gamma: g, cls };
+  }
+
+  // parsowanie pola Description z radiosondy.info (proste)
+  function parseDescription(desc) {
+    if (!desc) return {};
+    const num = re => {
+      const m = desc.match(re);
+      return m ? parseFloat(m[1]) : null;
+    };
+    const out = {};
+    out.verticalSpeed = num(/Clb\s*=\s*([-+]?\d+(?:\.\d+)?)\s*m\/s/i);
+    out.temp = num(/t\s*=\s*([-+]?\d+(?:\.\d+)?)\s*C/i);
+    out.humidity = num(/h\s*=\s*([-+]?\d+(?:\.\d+)?)\s*%/i);
+    out.pressure = num(/p\s*=\s*([-+]?\d+(?:\.\d+)?)\s*hPa/i);
+    out.battery = num(/(?:batt|bat|vbatt)\s*=\s*([-+]?\d+(?:\.\d+)?)\s*V/i);
+    return out;
   }
 
   // ======= Login =======
@@ -326,7 +323,7 @@
       restartFetching();
     });
 
-    // Fullscreen wykresów / mini-mapy – ten sam przycisk włącza/wyłącza
+    // Fullscreen wykresów
     $$('.fullscreen-toggle').forEach(btn => {
       btn.addEventListener('click', () => {
         const card = btn.closest('.card');
@@ -460,7 +457,8 @@
       desc: colIdx(['description', 'desc'])
     };
 
-    // Fallback dla typowego układu CSV z radiosondy.info (SONDE;Type;QRG;StartPlace;DateTime;Lat;Lon;Course;Speed;Altitude;Description;...)
+    // Fallback dla typowego eksportu radiosondy.info:
+    // SONDE;Type;QRG;StartPlace;DateTime;Latitude;Longitude;Course;Speed;Altitude;Description;Status;Finder
     if (idx.id === -1 && headers.length > 0) idx.id = 0;
     if (idx.type === -1 && headers.length > 1) idx.type = 1;
     if (idx.time === -1 && headers.length > 4) idx.time = 4;
@@ -686,7 +684,7 @@
     s.marker.bindTooltip(label, { direction: 'top', offset: [0, -8] });
   }
 
-  // Launch / Burst na trasie lotu (prosty: start + najwyższy punkt)
+  // Launch / Burst – start + najwyższy punkt
   function updateLaunchBurstMarkers(s) {
     if (!state.map || !s.history.length) return;
 
@@ -751,7 +749,6 @@
     const wrap = $('#sonde-tabs');
     wrap.innerHTML = '';
     const list = [...state.sondes.values()];
-
     list.sort((a, b) => (b.time || 0) - (a.time || 0));
 
     for (const s of list) {
@@ -855,7 +852,7 @@
     });
   }
 
-  // ======= Wykresy =======
+  // ======= Wykresy – grafanowy styl (czas na X) =======
   function ensureChart(id, builder) {
     if (state.charts[id]) return state.charts[id];
     const ctx = document.getElementById(id);
@@ -905,71 +902,11 @@
 
   function resizeCharts() {
     Object.values(state.charts).forEach(c => c && c.resize());
-    if (state.miniMap) {
-      setTimeout(() => state.miniMap.invalidateSize(), 80);
-    }
-  }
-
-  function renderMiniMap(s, hist) {
-    const mapEl = document.getElementById('mini-map');
-    if (!mapEl) return;
-
-    if (!state.miniMap) {
-      state.miniMap = L.map('mini-map', {
-        zoomControl: false,
-        attributionControl: false
-      });
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OSM contributors'
-      }).addTo(state.miniMap);
-    }
-
-    if (!s || !hist.length) {
-      state.miniMap.setView([RX.lat, RX.lon], 4);
-      if (state.miniPolyline) state.miniPolyline.setLatLngs([]);
-      if (state.miniMarker) {
-        state.miniMarker.remove();
-        state.miniMarker = null;
-      }
-      return;
-    }
-
-    const path = hist
-      .filter(h => Number.isFinite(h.lat) && Number.isFinite(h.lon))
-      .map(h => [h.lat, h.lon]);
-    if (!path.length) return;
-
-    if (!state.miniPolyline) {
-      state.miniPolyline = L.polyline(path, {
-        color: 'rgba(61,212,255,0.8)',
-        weight: 2
-      }).addTo(state.miniMap);
-    } else {
-      state.miniPolyline.setLatLngs(path);
-    }
-
-    const last = hist[hist.length - 1];
-    if (!state.miniMarker) {
-      state.miniMarker = L.circleMarker([last.lat, last.lon], {
-        radius: 4,
-        color: '#7bffb0',
-        fillColor: '#7bffb0',
-        fillOpacity: 0.95
-      }).addTo(state.miniMap);
-    } else {
-      state.miniMarker.setLatLng([last.lat, last.lon]);
-    }
-
-    const bounds = L.latLngBounds(path);
-    state.miniMap.fitBounds(bounds, { padding: [10, 10] });
   }
 
   function renderCharts() {
     const s = state.sondes.get(state.activeId);
     const hist = s ? s.history.slice().sort((a, b) => a.time - b.time) : [];
-
-    // mała mapa
-    renderMiniMap(s, hist);
 
     // 1) Temp vs czas
     (function () {
@@ -1043,11 +980,11 @@
         }
       }));
       if (!chart) return;
-      chart.data.datasets[0].data = [];
+      chart.data.datasets[0].data = []; // TTGO w przyszłości
       chart.update('none');
     })();
 
-    // 3) Payload Environmental Sensor Data – T/RH/p
+    // 3) Payload Environmental Sensor Data – T / RH / p
     (function () {
       const id = 'chart-env';
       const chart = ensureChart(id, () => ({
@@ -1112,7 +1049,7 @@
       chart.update('none');
     })();
 
-    // 4) Horizontal Velocity – czasowo
+    // 4) Horizontal Velocity – z historii sondy
     (function () {
       const id = 'chart-hvel';
       const chart = ensureChart(id, () => ({
@@ -1160,119 +1097,6 @@
       }
 
       chart.data.datasets[0].data = hvData;
-      chart.update('none');
-    })();
-
-    // 5) Gęstość powietrza vs wysokość
-    (function () {
-      const id = 'chart-density';
-      const chart = ensureChart(id, () => ({
-        type: 'scatter',
-        data: {
-          datasets: [
-            {
-              label: 'Gęstość [kg/m³]',
-              data: [],
-              borderWidth: 1.2,
-              pointRadius: 3,
-              showLine: true
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          parsing: false,
-          scales: {
-            x: {
-              type: 'linear',
-              title: { display: true, text: 'Gęstość [kg/m³]', color: '#e6ebff' },
-              grid: { color: 'rgba(134,144,176,.35)' },
-              ticks: { color: '#e6ebff' }
-            },
-            y: commonY('Wysokość [m]')
-          },
-          plugins: {
-            tooltip: tooltipWithAltitude(),
-            legend: { labels: { color: '#e6ebff' } }
-          }
-        }
-      }));
-      if (!chart) return;
-
-      const R = 287; // J/(kg*K)
-      const densityData = hist
-        .filter(h => Number.isFinite(h.pressure) && Number.isFinite(h.temp) && Number.isFinite(h.alt))
-        .map(h => {
-          const pPa = h.pressure * 100;
-          const Tk = h.temp + 273.15;
-          const rho = pPa / (R * Tk);
-          return { x: rho, y: h.alt, alt: h.alt };
-        });
-
-      chart.data.datasets[0].data = densityData;
-      chart.update('none');
-    })();
-
-    // 6) Moc sygnału i napięcie vs temperatura
-    (function () {
-      const id = 'chart-signal-temp';
-      const chart = ensureChart(id, () => ({
-        type: 'scatter',
-        data: {
-          datasets: [
-            {
-              label: 'RSSI [dB]',
-              yAxisID: 'yRssi',
-              data: [],
-              borderWidth: 1.2,
-              pointRadius: 3,
-              showLine: false
-            },
-            {
-              label: 'Napięcie [V]',
-              yAxisID: 'yU',
-              data: [],
-              borderWidth: 1.2,
-              pointRadius: 3,
-              showLine: false
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          parsing: false,
-          scales: {
-            x: {
-              type: 'linear',
-              title: { display: true, text: 'Temperatura [°C]', color: '#e6ebff' },
-              grid: { color: 'rgba(134,144,176,.35)' },
-              ticks: { color: '#e6ebff' }
-            },
-            yRssi: commonY('RSSI [dB]'),
-            yU: { ...commonY('U [V]'), position: 'right' }
-          },
-          plugins: {
-            tooltip: tooltipWithAltitude(),
-            legend: { labels: { color: '#e6ebff' } }
-          }
-        }
-      }));
-      if (!chart) return;
-
-      const rssiData = hist
-        .filter(h => Number.isFinite(h.rssi) && Number.isFinite(h.temp))
-        .map(h => ({ x: h.temp, y: h.rssi, alt: h.alt }));
-
-      const uData = hist
-        .filter(h => Number.isFinite(h.battery) && Number.isFinite(h.temp))
-        .map(h => ({ x: h.temp, y: h.battery, alt: h.alt }));
-
-      chart.data.datasets[0].data = rssiData;
-      chart.data.datasets[1].data = uData;
       chart.update('none');
     })();
   }
