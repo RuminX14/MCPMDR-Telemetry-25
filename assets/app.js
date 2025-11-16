@@ -777,7 +777,7 @@
     }
   }
 
-  function renderPanel() {
+   function renderPanel() {
     const s = state.sondes.get(state.activeId);
     const panel = $('#sonde-panel');
     if (!s) {
@@ -790,6 +790,30 @@
     const statusStr = s.status === 'active'
       ? t.status_active
       : t.status_ended;
+
+    // kolorowy „badge” stabilności
+    let stabColor = '#8a94b0';
+    if (s.stabilityClass) {
+      if (/silnie chwiejna/i.test(s.stabilityClass)) stabColor = '#7bffb0';
+      else if (/chwiejna/i.test(s.stabilityClass))   stabColor = '#3dd4ff';
+      else if (/obojętna/i.test(s.stabilityClass))   stabColor = '#e6ebff';
+      else if (/stabilna/i.test(s.stabilityClass))   stabColor = '#ffb347';
+      if (/silnie stabilna/i.test(s.stabilityClass)) stabColor = '#ff5470';
+    }
+
+    const stabilityBadge = s.stabilityClass
+      ? `<span class="stability-badge" style="
+            margin-left:8px;
+            padding:2px 8px;
+            border-radius:999px;
+            font-size:11px;
+            background:${stabColor}22;
+            color:${stabColor};
+            border:1px solid ${stabColor}55;
+          ">
+           ${s.stabilityClass}
+         </span>`
+      : '';
 
     const items = [
       { label: 'Wysokość [m]', value: fmt(s.alt, 0) },
@@ -807,13 +831,14 @@
       { label: 'Stabilność Γ [K/km]', value: fmt(s.stabilityIndex, 1) }
     ];
 
-    const stabilityTag = s.stabilityClass ? ` — ${s.stabilityClass}` : '';
-
     panel.innerHTML = `
       <div class="card" style="grid-column:1/-1">
         <div class="label">${s.type || ''}</div>
         <div class="value" style="font-weight:700;font-size:20px">${s.id}</div>
-        <div class="sub">${timeStr} — ${statusStr}${stabilityTag}</div>
+        <div class="sub">
+          ${timeStr} — ${statusStr}
+          ${stabilityBadge}
+        </div>
       </div>
       ${items.map(i => `
         <div class="card">
@@ -827,6 +852,7 @@
       el.classList.toggle('active', el.textContent.endsWith(s.id));
     });
   }
+
 
   // ======= Wykresy =======
   function ensureChart(id, builder) {
