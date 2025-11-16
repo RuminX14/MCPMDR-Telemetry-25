@@ -1,5 +1,5 @@
 // /api/radiosondy.js – Vercel Serverless Function
-// Proxy do radiosondy.info z cache 30 s, timeout 12 s i CORS
+// Proxy do radiosondy.info z cache 30 s, timeout 30 s i CORS
 
 const UPSTREAM_URL =
   "https://radiosondy.info/export/export_search.php?csv=1&search_limit=200";
@@ -32,9 +32,9 @@ export default async function handler(req, res) {
       return res.status(200).send(cacheData);
     }
 
-    // Upstream fetch z timeoutem 12 s
+    // Upstream fetch z timeoutem 30 s
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    const timeout = setTimeout(() => controller.abort(), 30000);
 
     const upstreamRes = await fetch(UPSTREAM_URL, {
       method: "GET",
@@ -74,8 +74,13 @@ export default async function handler(req, res) {
     const isTimeout =
       err && (err.name === "AbortError" || String(err).includes("timeout"));
 
-    return res
-      .status(504)
-      .send(isTimeout ? "timeout" : "proxy error: " + String(err));
+    // 504 tylko dla prawdziwego timeoutu, reszta 502 z opisem
+    if (isTimeout) {
+      return res.status(504).send("timeout connecting to radiosondy.info");
+    } else {
+      return res
+        .status(502)
+        .send("proxy error: " + String(err));
+    }
   }
 }
