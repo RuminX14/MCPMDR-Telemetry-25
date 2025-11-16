@@ -460,13 +460,15 @@
       desc: colIdx(['description', 'desc'])
     };
 
-    // Fallback dla typowego układu CSV z radiosondy.info
+    // Fallback dla typowego układu CSV z radiosondy.info (SONDE;Type;QRG;StartPlace;DateTime;Lat;Lon;Course;Speed;Altitude;Description;...)
     if (idx.id === -1 && headers.length > 0) idx.id = 0;
     if (idx.type === -1 && headers.length > 1) idx.type = 1;
-    if (idx.time === -1 && headers.length > 2) idx.time = 2;
-    if (idx.lat === -1 && headers.length > 3) idx.lat = 5; // w typowym eksporcie DateTime,Lat,Lon,Course,Speed,Altitude...
-    if (idx.lon === -1 && headers.length > 4) idx.lon = 6;
-    if (idx.alt === -1 && headers.length > 7) idx.alt = 8;
+    if (idx.time === -1 && headers.length > 4) idx.time = 4;
+    if (idx.lat === -1 && headers.length > 5) idx.lat = 5;
+    if (idx.lon === -1 && headers.length > 6) idx.lon = 6;
+    if (idx.windDir === -1 && headers.length > 7) idx.windDir = 7;
+    if (idx.windSpeed === -1 && headers.length > 8) idx.windSpeed = 8;
+    if (idx.alt === -1 && headers.length > 9) idx.alt = 9;
     if (idx.desc === -1 && headers.length > 10) idx.desc = 10;
 
     for (let li = 1; li < lines.length; li++) {
@@ -777,7 +779,7 @@
     }
   }
 
-   function renderPanel() {
+  function renderPanel() {
     const s = state.sondes.get(state.activeId);
     const panel = $('#sonde-panel');
     if (!s) {
@@ -852,7 +854,6 @@
       el.classList.toggle('active', el.textContent.endsWith(s.id));
     });
   }
-
 
   // ======= Wykresy =======
   function ensureChart(id, builder) {
@@ -1272,21 +1273,6 @@
 
       chart.data.datasets[0].data = rssiData;
       chart.data.datasets[1].data = uData;
-      chart.update('none');
-    })();
-
-  
-      if (!chart) return;
-
-      const stabData = hist
-        .filter(h => Number.isFinite(h.temp) && Number.isFinite(h.pressure) && Number.isFinite(h.alt))
-        .map(h => {
-          const th = thetaK(h.temp, h.pressure);
-          return { x: th, y: h.alt, alt: h.alt };
-        })
-        .filter(pt => Number.isFinite(pt.x));
-
-      chart.data.datasets[0].data = stabData;
       chart.update('none');
     })();
   }
