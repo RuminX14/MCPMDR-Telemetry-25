@@ -107,7 +107,16 @@
       <!-- WIDOK: DANE GRAFICZNE -->
       <section id="view-charts" class="view">
         <div class="charts-layout">
-          <!-- 1) Temperatura vs czas -->
+          <!-- mini mapa trasy -->
+          <div class="card chart-card">
+            <div class="card-head">
+              <span>Trasa aktywnej sondy</span>
+              <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
+            </div>
+            <div id="mini-map" class="mini-map"></div>
+          </div>
+
+          <!-- 1) Temperatura w czasie -->
           <div class="card chart-card">
             <div class="card-head">
               <span>Temperatura w czasie</span>
@@ -116,7 +125,7 @@
             <canvas id="chart-volt-temp"></canvas>
           </div>
 
-          <!-- 2) GNSS (placeholder) -->
+          <!-- 2) GNSS -->
           <div class="card chart-card">
             <div class="card-head">
               <span>GNSS – satelity w użyciu</span>
@@ -125,7 +134,7 @@
             <canvas id="chart-gnss"></canvas>
           </div>
 
-          <!-- 3) Czujniki środowiskowe -->
+          <!-- 3) Środowisko (T / RH / p) -->
           <div class="card chart-card">
             <div class="card-head">
               <span>Temperatura / wilgotność / ciśnienie</span>
@@ -142,14 +151,39 @@
             </div>
             <canvas id="chart-hvel"></canvas>
           </div>
+
+          <!-- 5) Gęstość powietrza -->
+          <div class="card chart-card">
+            <div class="card-head">
+              <span>Gęstość powietrza vs wysokość</span>
+              <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
+            </div>
+            <canvas id="chart-density"></canvas>
+          </div>
+
+          <!-- 6) RSSI / napięcie vs temperatura -->
+          <div class="card chart-card">
+            <div class="card-head">
+              <span>RSSI i napięcie vs temperatura</span>
+              <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
+            </div>
+            <canvas id="chart-signal-temp"></canvas>
+          </div>
+
+          <!-- 7) Stabilność – θ vs wysokość -->
+          <div class="card chart-card">
+            <div class="card-head">
+              <span>Stabilność atmosfery (θ)</span>
+              <button class="btn-icon fullscreen-toggle" title="Pełny ekran">⤢</button>
+            </div>
+            <canvas id="chart-stability"></canvas>
+          </div>
         </div>
       </section>
     </main>
 
     <!-- Status linii -->
-    <footer id="status-line" class="status-line">
-      <!-- komunikaty o stanie pobierania -->
-    </footer>
+    <footer id="status-line" class="status-line"></footer>
   </div>
 
   <!-- Leaflet JS -->
