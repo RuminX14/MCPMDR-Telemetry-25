@@ -1249,42 +1249,7 @@
       chart.update('none');
     })();
 
-    // 7) Wskaźnik stabilności atmosfery – θ vs wysokość
-    (function () {
-      const id = 'chart-stability';
-      const chart = ensureChart(id, () => ({
-        type: 'scatter',
-        data: {
-          datasets: [
-            {
-              label: 'θ [K]',
-              data: [],
-              borderWidth: 1.2,
-              pointRadius: 3,
-              showLine: true
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          parsing: false,
-          scales: {
-            x: {
-              type: 'linear',
-              title: { display: true, text: 'θ [K]', color: '#e6ebff' },
-              grid: { color: 'rgba(134,144,176,.35)' },
-              ticks: { color: '#e6ebff' }
-            },
-            y: commonY('Wysokość [m]')
-          },
-          plugins: {
-            tooltip: tooltipWithAltitude(),
-            legend: { labels: { color: '#e6ebff' } }
-          }
-        }
-      }));
+  
       if (!chart) return;
 
       const stabData = hist
