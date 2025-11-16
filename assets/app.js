@@ -73,6 +73,13 @@
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
   const fmt = (v, d = 0) => Number.isFinite(v) ? v.toFixed(d) : '—';
 
+  const pickFirstFinite = (...vals) => {
+    for (const v of vals) {
+      if (Number.isFinite(v)) return v;
+    }
+    return null;
+  };
+
   function haversine(lat1, lon1, lat2, lon2) {
     const R = 6371000;
     const toRad = x => x * Math.PI / 180;
@@ -127,6 +134,58 @@
       }
     }
     return null;
+  }
+
+  // parsowanie pola Description z radiosondy.info
+  function parseDescription(desc) {
+    if (!desc) return {};
+    const num = re => {
+      const m = desc.match(re);
+      return m ? parseFloat(m[1]) : null;
+    };
+    const out = {};
+    out.verticalSpeed = num(/Clb\s*=\s*([-+]?\d+(?:\.\d+)?)\s*m\/s/i);
+    out.temp = num(/t\s*=\s*([-+]?\d+(?:\.\d+)?)\s*C/i);
+    out.humidity = num(/h\s*=\s*([-+]?\d+(?:\.\d+)?)\s*%/i);
+    out.pressure = num(/p\s*=\s*([-+]?\d+(?:\.\d+)?)\s*hPa/i);
+    out.battery = num(/(?:batt|bat|vbatt)\s*=\s*([-+]?\d+(?:\.\d+)?)\s*V/i);
+    return out;
+  }
+
+  function computeStability(history) {
+    const pts = history
+      .filter(h => Number.isFinite(h.temp) && Number.isFinite(h.alt))
+      .sort((a, b) => a.alt - b.alt);
+    if (pts.length < 2) return { gamma: null, cls: null };
+
+    const maxSeg = Math.min(pts.length - 1, 10);
+    let sum = 0;
+    let count = 0;
+
+    for (let i = pts.length - maxSeg; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const dz = (b.alt - a.alt) / 1000; // km
+      if (dz <= 0.05) continue;
+      const dT = b.temp - a.temp;
+      const gamma = -dT / dz; // K/km
+      if (Number.isFinite(gamma)) {
+        sum += gamma;
+        count++;
+      }
+    }
+    if (!count) return { gamma: null, cls: null };
+
+    const g = sum / count;
+    let cls = null;
+    if (!Number.isFinite(g)) cls = null;
+    else if (g > 9.8) cls = 'silnie chwiejna';
+    else if (g > 7) cls = 'chwiejna';
+    else if (g > 4) cls = 'obojętna';
+    else if (g > 0) cls = 'stabilna';
+    else cls = 'silnie stabilna';
+
+    return { gamma: g, cls };
   }
 
   // ======= Login =======
@@ -367,7 +426,7 @@
   // ======= CSV parsing =======
   function parseAndMergeCSV(csv) {
     if (!csv) return;
-    const lines = csv.split(/\\r?\\n/).filter(l => l.trim().length);
+    const lines = csv.split(/\r?\n/).filter(l => l.trim().length);
     if (lines.length < 2) return;
 
     const sep = lines[0].includes(';') ? ';' : ',';
@@ -397,22 +456,18 @@
       windSpeed: colIdx(['speed', 'ws']),
       windDir: colIdx(['course', 'wd']),
       rssi: colIdx(['rssi']),
-      time: colIdx(['datetime', 'time', 'timestamp'])
+      time: colIdx(['datetime', 'time', 'timestamp']),
+      desc: colIdx(['description', 'desc'])
     };
 
     // Fallback dla typowego układu CSV z radiosondy.info
     if (idx.id === -1 && headers.length > 0) idx.id = 0;
     if (idx.type === -1 && headers.length > 1) idx.type = 1;
     if (idx.time === -1 && headers.length > 2) idx.time = 2;
-    if (idx.lat === -1 && headers.length > 3) idx.lat = 3;
-    if (idx.lon === -1 && headers.length > 4) idx.lon = 4;
-    if (idx.alt === -1 && headers.length > 5) idx.alt = 5;
-    if (idx.temp === -1 && headers.length > 6) idx.temp = 6;
-    if (idx.pressure === -1 && headers.length > 7) idx.pressure = 7;
-    if (idx.humidity === -1 && headers.length > 8) idx.humidity = 8;
-    if (idx.windSpeed === -1 && headers.length > 9) idx.windSpeed = 9;
-    if (idx.windDir === -1 && headers.length > 10) idx.windDir = 10;
-    if (idx.rssi === -1 && headers.length > 11) idx.rssi = 11;
+    if (idx.lat === -1 && headers.length > 3) idx.lat = 5; // w typowym eksporcie DateTime,Lat,Lon,Course,Speed,Altitude...
+    if (idx.lon === -1 && headers.length > 4) idx.lon = 6;
+    if (idx.alt === -1 && headers.length > 7) idx.alt = 8;
+    if (idx.desc === -1 && headers.length > 10) idx.desc = 10;
 
     for (let li = 1; li < lines.length; li++) {
       const row = lines[li].split(sep);
@@ -451,11 +506,14 @@
         humidity: toNum(rec(idx.humidity))
       };
 
+      const desc = rec(idx.desc);
+
       mergePoint(s, point, {
         type: rec(idx.type),
         windSpeed: toNum(rec(idx.windSpeed)),
         windDir: toNum(rec(idx.windDir)),
-        rssi: toNum(rec(idx.rssi))
+        rssi: toNum(rec(idx.rssi)),
+        description: desc
       });
     }
 
@@ -488,6 +546,7 @@
         windSpeed: null,
         windDir: null,
         rssi: null,
+        battery: null,
         time: null,
         dewPoint: null,
         horizontalSpeed: null,
@@ -500,6 +559,8 @@
         zeroIsoHeight: null,
         ageSec: null,
         status: 'active',
+        stabilityIndex: null,
+        stabilityClass: null,
         history: [],
         marker: null,
         polyline: null,
@@ -513,28 +574,45 @@
   function mergePoint(s, p, extra) {
     s.type = extra.type || s.type;
 
+    const meta = parseDescription(extra.description);
+
+    const merged = {
+      time: p.time,
+      lat: p.lat,
+      lon: p.lon,
+      alt: p.alt,
+      temp: pickFirstFinite(p.temp, meta.temp),
+      pressure: pickFirstFinite(p.pressure, meta.pressure),
+      humidity: pickFirstFinite(p.humidity, meta.humidity)
+    };
+    const rssiVal = pickFirstFinite(extra.rssi);
+    const batteryVal = pickFirstFinite(meta.battery);
+
     if (!s.time || p.time > s.time) {
       s.history.push({
-        time: p.time,
-        lat: p.lat,
-        lon: p.lon,
-        alt: p.alt,
-        temp: p.temp,
-        pressure: p.pressure,
-        humidity: p.humidity,
-        rssi: extra.rssi
+        time: merged.time,
+        lat: merged.lat,
+        lon: merged.lon,
+        alt: merged.alt,
+        temp: merged.temp,
+        pressure: merged.pressure,
+        humidity: merged.humidity,
+        rssi: rssiVal,
+        battery: batteryVal
       });
       if (s.history.length > HISTORY_LIMIT) {
         s.history.splice(0, s.history.length - HISTORY_LIMIT);
       }
     }
 
-    Object.assign(s, p, {
+    Object.assign(s, merged, {
       windSpeed: extra.windSpeed,
       windDir: extra.windDir,
-      rssi: extra.rssi
+      rssi: rssiVal,
+      battery: batteryVal
     });
 
+    s.time = merged.time;
     s.ageSec = (Date.now() - s.time) / 1000;
     s.status = (s.ageSec > ACTIVE_TIMEOUT_SEC) ? 'finished' : 'active';
 
@@ -553,17 +631,24 @@
       const b = s.history[n - 1];
       const dt = clamp((b.time - a.time) / 1000, 0.5, 600);
       const dH = haversine(a.lat, a.lon, b.lat, b.lon);
+      const vz = (Number.isFinite(a.alt) && Number.isFinite(b.alt))
+        ? (b.alt - a.alt) / dt
+        : null;
+
       s.horizontalSpeed = dH / dt;
-      s.verticalSpeed =
-        (Number.isFinite(a.alt) && Number.isFinite(b.alt))
-          ? (b.alt - a.alt) / dt
-          : null;
+      s.verticalSpeed = pickFirstFinite(meta.verticalSpeed, vz);
       s.speed3d =
-        (Number.isFinite(s.verticalSpeed) && Number.isFinite(s.horizontalSpeed))
+        (Number.isFinite(s.horizontalSpeed) && Number.isFinite(s.verticalSpeed))
           ? Math.sqrt(dH * dH + (b.alt - a.alt) ** 2) / dt
           : null;
       s.horizontalCourse = bearing(a.lat, a.lon, b.lat, b.lon);
+    } else {
+      s.verticalSpeed = pickFirstFinite(meta.verticalSpeed, s.verticalSpeed);
     }
+
+    const stab = computeStability(s.history);
+    s.stabilityIndex = stab.gamma;
+    s.stabilityClass = stab.cls;
 
     ensureMapObjects(s);
     updateLaunchBurstMarkers(s);
@@ -599,7 +684,7 @@
     s.marker.bindTooltip(label, { direction: 'top', offset: [0, -8] });
   }
 
-  // Launch / Burst na trasie lotu
+  // Launch / Burst na trasie lotu (prosty: start + najwyższy punkt)
   function updateLaunchBurstMarkers(s) {
     if (!state.map || !s.history.length) return;
 
@@ -664,6 +749,7 @@
     const wrap = $('#sonde-tabs');
     wrap.innerHTML = '';
     const list = [...state.sondes.values()];
+
     list.sort((a, b) => (b.time || 0) - (a.time || 0));
 
     for (const s of list) {
@@ -717,15 +803,17 @@
       { label: 'Odległość od RX [m]', value: fmt(s.distanceToRx, 0) },
       { label: '0 °C izoterma [m]', value: fmt(s.zeroIsoHeight, 0) },
       { label: 'LCL [m]', value: fmt(s.lclHeight, 0) },
-      { label: 'θ [K]', value: fmt(s.theta, 1) }
-      // wskaźnik stabilności dodamy w finalnej wersji
+      { label: 'θ [K]', value: fmt(s.theta, 1) },
+      { label: 'Stabilność Γ [K/km]', value: fmt(s.stabilityIndex, 1) }
     ];
+
+    const stabilityTag = s.stabilityClass ? ` — ${s.stabilityClass}` : '';
 
     panel.innerHTML = `
       <div class="card" style="grid-column:1/-1">
         <div class="label">${s.type || ''}</div>
         <div class="value" style="font-weight:700;font-size:20px">${s.id}</div>
-        <div class="sub">${timeStr} — ${statusStr}</div>
+        <div class="sub">${timeStr} — ${statusStr}${stabilityTag}</div>
       </div>
       ${items.map(i => `
         <div class="card">
@@ -744,6 +832,7 @@
   function ensureChart(id, builder) {
     if (state.charts[id]) return state.charts[id];
     const ctx = document.getElementById(id);
+    if (!ctx) return null;
     const cfg = builder(ctx);
     const chart = new Chart(ctx, cfg);
     state.charts[id] = chart;
@@ -788,7 +877,7 @@
   }
 
   function resizeCharts() {
-    Object.values(state.charts).forEach(c => c.resize());
+    Object.values(state.charts).forEach(c => c && c.resize());
     if (state.miniMap) {
       setTimeout(() => state.miniMap.invalidateSize(), 80);
     }
@@ -855,7 +944,7 @@
     // mała mapa
     renderMiniMap(s, hist);
 
-    // 1) Voltages vs Temperature – T(czas)
+    // 1) Temp vs czas
     (function () {
       const id = 'chart-volt-temp';
       const chart = ensureChart(id, () => ({
@@ -886,6 +975,7 @@
           }
         }
       }));
+      if (!chart) return;
 
       const tempData = hist
         .filter(h => Number.isFinite(h.temp))
@@ -925,7 +1015,7 @@
           }
         }
       }));
-
+      if (!chart) return;
       chart.data.datasets[0].data = [];
       chart.update('none');
     })();
@@ -977,6 +1067,7 @@
           }
         }
       }));
+      if (!chart) return;
 
       const tempData = hist
         .filter(h => Number.isFinite(h.temp))
@@ -1024,6 +1115,7 @@
           }
         }
       }));
+      if (!chart) return;
 
       const hvData = [];
       if (s && s.history.length >= 2) {
@@ -1080,6 +1172,7 @@
           }
         }
       }));
+      if (!chart) return;
 
       const R = 287; // J/(kg*K)
       const densityData = hist
@@ -1141,15 +1234,68 @@
           }
         }
       }));
+      if (!chart) return;
 
       const rssiData = hist
         .filter(h => Number.isFinite(h.rssi) && Number.isFinite(h.temp))
         .map(h => ({ x: h.temp, y: h.rssi, alt: h.alt }));
 
-      const uData = []; // napięcie z TTGO w przyszłości
+      const uData = hist
+        .filter(h => Number.isFinite(h.battery) && Number.isFinite(h.temp))
+        .map(h => ({ x: h.temp, y: h.battery, alt: h.alt }));
 
       chart.data.datasets[0].data = rssiData;
       chart.data.datasets[1].data = uData;
+      chart.update('none');
+    })();
+
+    // 7) Wskaźnik stabilności atmosfery – θ vs wysokość
+    (function () {
+      const id = 'chart-stability';
+      const chart = ensureChart(id, () => ({
+        type: 'scatter',
+        data: {
+          datasets: [
+            {
+              label: 'θ [K]',
+              data: [],
+              borderWidth: 1.2,
+              pointRadius: 3,
+              showLine: true
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          parsing: false,
+          scales: {
+            x: {
+              type: 'linear',
+              title: { display: true, text: 'θ [K]', color: '#e6ebff' },
+              grid: { color: 'rgba(134,144,176,.35)' },
+              ticks: { color: '#e6ebff' }
+            },
+            y: commonY('Wysokość [m]')
+          },
+          plugins: {
+            tooltip: tooltipWithAltitude(),
+            legend: { labels: { color: '#e6ebff' } }
+          }
+        }
+      }));
+      if (!chart) return;
+
+      const stabData = hist
+        .filter(h => Number.isFinite(h.temp) && Number.isFinite(h.pressure) && Number.isFinite(h.alt))
+        .map(h => {
+          const th = thetaK(h.temp, h.pressure);
+          return { x: th, y: h.alt, alt: h.alt };
+        })
+        .filter(pt => Number.isFinite(pt.x));
+
+      chart.data.datasets[0].data = stabData;
       chart.update('none');
     })();
   }
