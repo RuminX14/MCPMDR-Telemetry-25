@@ -1,14 +1,15 @@
-// /api/radiosondy.js – Vercel Serverless Function
-// Proxy do radiosondy.info z cache 30 s, timeout 30 s i CORS
+// /api/radiosondy.js – Vercel Serverless Function (CommonJS)
+// Proxy do radiosondy.info z cache 30 s
+
+const https = require("https");
 
 const UPSTREAM_URL =
   "https://radiosondy.info/export/export_search.php?csv=1&search_limit=200";
 
-// Cache w pamięci procesu (działa w obrębie pojedynczego workera)
 let cacheData = null;
 let cacheTs = 0; // ms
 
-export default async function handler(req, res) {
+module.exports = (req, res) => {
   // CORS / preflight
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
@@ -22,65 +23,60 @@ export default async function handler(req, res) {
     return res.status(405).send("Method not allowed");
   }
 
-  try {
-    const now = Date.now();
+  const now = Date.now();
 
-    // Jeżeli mamy świeży cache (< 30 s) – zwróć od razu
-    if (cacheData && now - cacheTs < 30000) {
-      res.setHeader("X-Proxy-Cache", "hit");
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      return res.status(200).send(cacheData);
-    }
+  // Świeży cache < 30 s
+  if (cacheData && now - cacheTs < 30000) {
+    res.setHeader("X-Proxy-Cache", "hit");
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    return res.status(200).send(cacheData);
+  }
 
-    // Upstream fetch z timeoutem 30 s
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-
-    const upstreamRes = await fetch(UPSTREAM_URL, {
-      method: "GET",
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (!upstreamRes.ok) {
-      // jeżeli upstream padł, ale mamy cache -> stale-cache
+  // Pobieramy CSV przez https.get z timeoutem
+  const request = https.get(UPSTREAM_URL, (upRes) => {
+    if (upRes.statusCode < 200 || upRes.statusCode >= 300) {
+      // Upstream error – jeśli mamy cache, zwracamy stale
       if (cacheData) {
         res.setHeader("X-Proxy-Warn", "stale-cache");
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         return res.status(200).send(cacheData);
       }
       return res
-        .status(upstreamRes.status || 502)
-        .send("Upstream error " + upstreamRes.status);
+        .status(upRes.statusCode || 502)
+        .send("Upstream error " + upRes.statusCode);
     }
 
-    const text = await upstreamRes.text();
+    let body = "";
 
-    // Zapisz cache
-    cacheData = text;
-    cacheTs = Date.now();
+    upRes.setEncoding("utf8");
+    upRes.on("data", (chunk) => {
+      body += chunk;
+    });
 
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    return res.status(200).send(text);
-  } catch (err) {
-    // Timeout lub inny błąd – jeśli mamy cache, zwracamy go jako stale
+    upRes.on("end", () => {
+      cacheData = body;
+      cacheTs = Date.now();
+
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.status(200).send(body);
+    });
+  });
+
+  // Timeout 30 s
+  request.setTimeout(30000, () => {
+    request.destroy(new Error("timeout"));
+  });
+
+  request.on("error", (err) => {
     if (cacheData) {
       res.setHeader("X-Proxy-Warn", "stale-cache");
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       return res.status(200).send(cacheData);
     }
-
-    const isTimeout =
-      err && (err.name === "AbortError" || String(err).includes("timeout"));
-
-    // 504 tylko dla prawdziwego timeoutu, reszta 502 z opisem
-    if (isTimeout) {
+    const msg = String(err && err.message ? err.message : err);
+    if (msg.toLowerCase().includes("timeout")) {
       return res.status(504).send("timeout connecting to radiosondy.info");
-    } else {
-      return res
-        .status(502)
-        .send("proxy error: " + String(err));
     }
-  }
-}
+    return res.status(502).send("proxy error: " + msg);
+  });
+};
